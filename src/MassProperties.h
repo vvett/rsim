@@ -1,25 +1,28 @@
 #pragma once
 #include <array>
+#include <Eigen/Dense>
+#include "defs.h"
 
 namespace rsim {
+    
+    class RigidBody {
 
-class Body {
-public:
-    using Matrix3 = std::array<std::array<double, 3>, 3>;
+        private:
+            Matrix3d moment_of_inertia_;
+            double mass_;
 
-    Body(double mass, Matrix3 moment_of_inertia);
+        public:
+            RigidBody(double mass, Matrix3d moment_of_inertia);
 
-    [[nodiscard]] double mass() const noexcept;
-    void setMass(double mass);
+            double mass() const;
 
-    [[nodiscard]] const Matrix3& momentOfInertia() const noexcept;
-    void setMomentOfInertia(Matrix3 moment_of_inertia) noexcept;
+            void setMass(double mass);
 
-    void printMass() const;
+            const Matrix3d& momentOfInertia() const noexcept;
+            
+            void setMomentOfInertia(Matrix3d moment_of_inertia);
 
-private:
-    Matrix3 moment_of_inertia_;
-    double mass_;
-};
+            void printMass() const;
 
+    };
 }  // namespace rsim

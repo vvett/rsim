@@ -35,3 +35,8 @@ Public C++ APIs belong in headers under `src`. Add each new implementation file 
 `rsim_core`, then bind its public classes, functions, and enums in
 `python/bindings.cpp` (or a focused binding source when that file grows). Add both
 C++ behavior tests and Python binding tests for every new public API.
+
+## Frame system
+
+See [docs/frames.md](docs/frames.md) for the frame API, transform convention,
+quaternion mathematics, composition and inversion rules, and update behavior.

@@ -4,33 +4,33 @@
 
 namespace rsim {
 
-Body::Body(double mass, Matrix3 moment_of_inertia)
+RigidBody::RigidBody(double mass, Matrix3d moment_of_inertia)
     : moment_of_inertia_(moment_of_inertia), mass_(mass) {
     if (mass <= 0.0) {
         throw std::invalid_argument("mass must be greater than zero");
     }
 }
 
-double Body::mass() const noexcept {
+double RigidBody::mass() const {
     return mass_;
 }
 
-void Body::setMass(double mass) {
+void RigidBody::setMass(double mass) {
     if (mass <= 0.0) {
         throw std::invalid_argument("mass must be greater than zero");
     }
     mass_ = mass;
 }
 
-const Body::Matrix3& Body::momentOfInertia() const noexcept {
+const Matrix3d& RigidBody::momentOfInertia() const noexcept {
     return moment_of_inertia_;
 }
 
-void Body::setMomentOfInertia(Matrix3 moment_of_inertia) noexcept {
+void RigidBody::setMomentOfInertia(Matrix3d moment_of_inertia) {
     moment_of_inertia_ = moment_of_inertia;
 }
 
-void Body::printMass() const {
+void RigidBody::printMass() const {
     std::cout << "Body mass is " << mass_ << '\n';
 }
 
