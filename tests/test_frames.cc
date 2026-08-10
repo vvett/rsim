@@ -14,45 +14,54 @@ bool nearlyEqual(const Eigen::Vector3d& left, const Eigen::Vector3d& right) {
     return (left - right).norm() < tolerance;
 }
 
-class MovingProvider final : public rsim::TransformProvider {
+class MovingFrameDefinition final : public rsim::FrameDefinition {
 public:
     void update() override {
         position_ += 1.0;
-        transform_ = rsim::Transform{
+        motion_ = rsim::FrameMotion::fixed(rsim::Transform{
             Eigen::Quaterniond::Identity(),
-            Eigen::Vector3d{position_, 0.0, 0.0}
-        };
+            Eigen::Vector3d{position_, 0.0, 0.0}});
     }
 
-    const rsim::Transform& parentFromChild() const override {
-        return transform_;
+    const rsim::FrameMotion& motionIntoParent() const override {
+        return motion_;
     }
 
 private:
     double position_ = 0.0;
-    rsim::Transform transform_;
+    rsim::FrameMotion motion_;
 };
 
 }  // namespace
 
 int main() {
-    auto root = std::make_shared<rsim::Frame>("root");
+    auto root = std::make_shared<rsim::Frame>(
+        "root", rsim::InertialStatus::Inertial);
     auto ecef = std::make_shared<rsim::Frame>(
         "ecef",
+        rsim::InertialStatus::NonInertial,
         root,
-        std::make_unique<rsim::FixedTransformProvider>(rsim::Transform{
+        std::make_unique<rsim::FixedFrameDefinition>(rsim::Transform{
             Eigen::Quaterniond::Identity(),
             Eigen::Vector3d{1.0, 0.0, 0.0}
         }));
     auto ned = std::make_shared<rsim::Frame>(
         "ned",
+        rsim::InertialStatus::NonInertial,
         ecef,
-        std::make_unique<rsim::FixedTransformProvider>(rsim::Transform{
+        std::make_unique<rsim::FixedFrameDefinition>(rsim::Transform{
             Eigen::Quaterniond::Identity(),
             Eigen::Vector3d{0.0, 2.0, 0.0}
         }));
     auto moving = std::make_shared<rsim::Frame>(
-        "moving", root, std::make_unique<MovingProvider>());
+        "moving",
+        rsim::InertialStatus::NonInertial,
+        root,
+        std::make_unique<MovingFrameDefinition>());
+
+    assert(root->isInertial());
+    assert(!ecef->isInertial());
+    assert(ecef->inertialStatus() == rsim::InertialStatus::NonInertial);
 
     rsim::FrameGraph graph;
     graph.addFrame(ned);
@@ -81,4 +90,32 @@ int main() {
     };
     assert(nearlyEqual(quarter_turn.applyVector(Eigen::Vector3d::UnitX()),
                        Eigen::Vector3d::UnitY()));
+
+    const rsim::FrameMotion rotating_frame{
+        rsim::Transform::identity(),
+        Eigen::Vector3d::Zero(),
+        Eigen::Vector3d::Zero(),
+        Eigen::Vector3d{0.0, 0.0, 2.0},
+        Eigen::Vector3d::Zero()
+    };
+    const rsim::MotionState stationary_in_rotating_frame{
+        Eigen::Vector3d{3.0, 0.0, 0.0},
+        Eigen::Vector3d::Zero(),
+        Eigen::Vector3d::Zero()
+    };
+    const rsim::MotionState state_in_parent =
+        rotating_frame.convertState(stationary_in_rotating_frame);
+    assert(nearlyEqual(state_in_parent.velocity,
+                       Eigen::Vector3d{0.0, 6.0, 0.0}));
+    assert(nearlyEqual(state_in_parent.acceleration,
+                       Eigen::Vector3d{-12.0, 0.0, 0.0}));
+
+    const rsim::MotionState round_trip =
+        rotating_frame.inverse().convertState(state_in_parent);
+    assert(nearlyEqual(round_trip.position,
+                       stationary_in_rotating_frame.position));
+    assert(nearlyEqual(round_trip.velocity,
+                       stationary_in_rotating_frame.velocity));
+    assert(nearlyEqual(round_trip.acceleration,
+                       stationary_in_rotating_frame.acceleration));
 }

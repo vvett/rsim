@@ -1,7 +1,6 @@
 #include "Frames.h"
 
 #include <algorithm>
-#include <cmath>
 #include <stdexcept>
 #include <unordered_set>
 #include <utility>
@@ -10,14 +9,14 @@ namespace rsim {
 
 namespace {
 
-struct RootTransform {
+struct RootMotion {
     const Frame* root;
-    Transform root_from_frame;
+    FrameMotion root_from_frame;
 };
 
-RootTransform findRootTransform(const Frame& frame) {
+RootMotion findRootMotion(const Frame& frame) {
     const Frame* current = &frame;
-    Transform current_from_frame = Transform::identity();
+    FrameMotion current_from_frame;
     std::unordered_set<const Frame*> visited;
 
     while (!current->isRoot()) {
@@ -25,7 +24,7 @@ RootTransform findRootTransform(const Frame& frame) {
             throw std::logic_error("cycle detected in frame graph");
         }
 
-        current_from_frame = current->parentFromThis() * current_from_frame;
+        current_from_frame = current->motionIntoParent() * current_from_frame;
         current = current->parent().get();
     }
 
@@ -98,46 +97,175 @@ Transform operator*(const Transform& a_from_b, const Transform& b_from_c) {
     };
 }
 
-FixedTransformProvider::FixedTransformProvider(Transform parent_from_child)
-    : parent_from_child_(std::move(parent_from_child)) {}
+FrameMotion::FrameMotion()
+    : parent_from_child_(Transform::identity()),
+      child_origin_velocity_(Eigen::Vector3d::Zero()),
+      child_origin_acceleration_(Eigen::Vector3d::Zero()),
+      child_angular_velocity_(Eigen::Vector3d::Zero()),
+      child_angular_acceleration_(Eigen::Vector3d::Zero()) {}
 
-void FixedTransformProvider::update() {}
+FrameMotion::FrameMotion(
+    Transform parent_from_child,
+    Eigen::Vector3d child_origin_velocity,
+    Eigen::Vector3d child_origin_acceleration,
+    Eigen::Vector3d child_angular_velocity,
+    Eigen::Vector3d child_angular_acceleration)
+    : parent_from_child_(std::move(parent_from_child)),
+      child_origin_velocity_(std::move(child_origin_velocity)),
+      child_origin_acceleration_(std::move(child_origin_acceleration)),
+      child_angular_velocity_(std::move(child_angular_velocity)),
+      child_angular_acceleration_(std::move(child_angular_acceleration)) {}
 
-const Transform& FixedTransformProvider::parentFromChild() const {
+FrameMotion FrameMotion::fixed(Transform parent_from_child) {
+    return {std::move(parent_from_child),
+            Eigen::Vector3d::Zero(),
+            Eigen::Vector3d::Zero(),
+            Eigen::Vector3d::Zero(),
+            Eigen::Vector3d::Zero()};
+}
+
+const Transform& FrameMotion::transform() const noexcept {
     return parent_from_child_;
 }
 
-Frame::Frame(std::string name) : name_(std::move(name)) {
+const Eigen::Vector3d& FrameMotion::childOriginVelocity() const noexcept {
+    return child_origin_velocity_;
+}
+
+const Eigen::Vector3d& FrameMotion::childOriginAcceleration() const noexcept {
+    return child_origin_acceleration_;
+}
+
+const Eigen::Vector3d& FrameMotion::childAngularVelocity() const noexcept {
+    return child_angular_velocity_;
+}
+
+const Eigen::Vector3d& FrameMotion::childAngularAcceleration() const noexcept {
+    return child_angular_acceleration_;
+}
+
+MotionState FrameMotion::convertState(const MotionState& child_state) const {
+    const Eigen::Vector3d relative_position =
+        parent_from_child_.applyVector(child_state.position);
+    const Eigen::Vector3d relative_velocity =
+        parent_from_child_.applyVector(child_state.velocity);
+
+    return {
+        relative_position + parent_from_child_.translation(),
+        relative_velocity +
+            child_angular_velocity_.cross(relative_position) +
+            child_origin_velocity_,
+        parent_from_child_.applyVector(child_state.acceleration) +
+            child_origin_acceleration_ +
+            child_angular_acceleration_.cross(relative_position) +
+            child_angular_velocity_.cross(
+                child_angular_velocity_.cross(relative_position)) +
+            2.0 * child_angular_velocity_.cross(relative_velocity)
+    };
+}
+
+FrameMotion FrameMotion::inverse() const {
+    const Transform child_from_parent = parent_from_child_.inverse();
+    const Eigen::Vector3d& omega = child_angular_velocity_;
+    const Eigen::Vector3d& alpha = child_angular_acceleration_;
+    const Eigen::Vector3d& translation = parent_from_child_.translation();
+
+    return {
+        child_from_parent,
+        child_from_parent.applyVector(
+            -child_origin_velocity_ + omega.cross(translation)),
+        child_from_parent.applyVector(
+            -child_origin_acceleration_ + alpha.cross(translation) +
+            2.0 * omega.cross(child_origin_velocity_) -
+            omega.cross(omega.cross(translation))),
+        child_from_parent.applyVector(-omega),
+        child_from_parent.applyVector(-alpha)
+    };
+}
+
+FrameMotion operator*(const FrameMotion& a_from_b,
+                      const FrameMotion& b_from_c) {
+    const Eigen::Vector3d c_origin_from_b_in_a =
+        a_from_b.transform().applyVector(b_from_c.transform().translation());
+    const Eigen::Vector3d c_origin_velocity_in_a =
+        a_from_b.transform().applyVector(b_from_c.childOriginVelocity());
+    const Eigen::Vector3d c_angular_velocity_in_a =
+        a_from_b.transform().applyVector(b_from_c.childAngularVelocity());
+
+    return {
+        a_from_b.transform() * b_from_c.transform(),
+        a_from_b.childOriginVelocity() + c_origin_velocity_in_a +
+            a_from_b.childAngularVelocity().cross(c_origin_from_b_in_a),
+        a_from_b.childOriginAcceleration() +
+            a_from_b.transform().applyVector(
+                b_from_c.childOriginAcceleration()) +
+            a_from_b.childAngularAcceleration().cross(c_origin_from_b_in_a) +
+            a_from_b.childAngularVelocity().cross(
+                a_from_b.childAngularVelocity().cross(c_origin_from_b_in_a)) +
+            2.0 * a_from_b.childAngularVelocity().cross(
+                c_origin_velocity_in_a),
+        a_from_b.childAngularVelocity() + c_angular_velocity_in_a,
+        a_from_b.childAngularAcceleration() +
+            a_from_b.transform().applyVector(
+                b_from_c.childAngularAcceleration()) +
+            a_from_b.childAngularVelocity().cross(c_angular_velocity_in_a)
+    };
+}
+
+FixedFrameDefinition::FixedFrameDefinition(Transform parent_from_child)
+    : motion_(FrameMotion::fixed(std::move(parent_from_child))) {}
+
+FixedFrameDefinition::FixedFrameDefinition(FrameMotion parent_from_child)
+    : motion_(std::move(parent_from_child)) {}
+
+void FixedFrameDefinition::update() {}
+
+const FrameMotion& FixedFrameDefinition::motionIntoParent() const {
+    return motion_;
+}
+
+Frame::Frame(std::string name, InertialStatus inertial_status)
+    : name_(std::move(name)), inertial_status_(inertial_status) {
     if (name_.empty()) {
         throw std::invalid_argument("frame name must not be empty");
     }
 }
 
 Frame::Frame(std::string name,
+             InertialStatus inertial_status,
              std::shared_ptr<Frame> parent,
-             std::unique_ptr<TransformProvider> provider)
+             std::unique_ptr<FrameDefinition> definition)
     : name_(std::move(name)),
+      inertial_status_(inertial_status),
       parent_(std::move(parent)),
-      provider_(std::move(provider)) {
+      definition_(std::move(definition)) {
     if (name_.empty()) {
         throw std::invalid_argument("frame name must not be empty");
     }
     if (!parent_) {
         throw std::invalid_argument("child frame must have a parent");
     }
-    if (!provider_) {
-        throw std::invalid_argument("child frame must have a transform provider");
+    if (!definition_) {
+        throw std::invalid_argument("child frame must have a frame definition");
     }
 }
 
 void Frame::update() {
-    if (provider_) {
-        provider_->update();
+    if (definition_) {
+        definition_->update();
     }
 }
 
 const std::string& Frame::name() const noexcept {
     return name_;
+}
+
+InertialStatus Frame::inertialStatus() const noexcept {
+    return inertial_status_;
+}
+
+bool Frame::isInertial() const noexcept {
+    return inertial_status_ == InertialStatus::Inertial;
 }
 
 bool Frame::isRoot() const noexcept {
@@ -148,11 +276,11 @@ const std::shared_ptr<Frame>& Frame::parent() const noexcept {
     return parent_;
 }
 
-const Transform& Frame::parentFromThis() const {
-    if (!provider_) {
-        throw std::logic_error("root frame has no parent transform");
+const FrameMotion& Frame::motionIntoParent() const {
+    if (!definition_) {
+        throw std::logic_error("root frame has no parent motion");
     }
-    return provider_->parentFromChild();
+    return definition_->motionIntoParent();
 }
 
 void FrameGraph::addFrame(std::shared_ptr<Frame> frame) {
@@ -176,17 +304,15 @@ void FrameGraph::addFrame(std::shared_ptr<Frame> frame) {
 void FrameGraph::update() {
     std::unordered_set<const Frame*> updating;
     std::unordered_set<const Frame*> updated;
-
     for (const auto& frame : frames_) {
         updateFrame(*frame, updating, updated);
     }
 }
 
-Transform FrameGraph::transform(const Frame& destination,
-                                const Frame& source) const {
-    const RootTransform root_from_destination =
-        findRootTransform(destination);
-    const RootTransform root_from_source = findRootTransform(source);
+FrameMotion FrameGraph::motion(const Frame& destination,
+                               const Frame& source) const {
+    const RootMotion root_from_destination = findRootMotion(destination);
+    const RootMotion root_from_source = findRootMotion(source);
 
     if (root_from_destination.root != root_from_source.root) {
         throw std::invalid_argument(
@@ -195,6 +321,18 @@ Transform FrameGraph::transform(const Frame& destination,
 
     return root_from_destination.root_from_frame.inverse() *
            root_from_source.root_from_frame;
+}
+
+Transform FrameGraph::transform(const Frame& destination,
+                                const Frame& source) const {
+    return motion(destination, source).transform();
+}
+
+MotionState FrameGraph::convertState(
+    const Frame& destination,
+    const Frame& source,
+    const MotionState& source_state) const {
+    return motion(destination, source).convertState(source_state);
 }
 
 }  // namespace rsim

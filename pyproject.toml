@@ -7,6 +7,7 @@ name = "rsim"
 version = "0.1.0"
 description = "Python bindings for a C++ six-degree-of-freedom rocket simulation library"
 requires-python = ">=3.9"
+dependencies = ["numpy"]
 
 [tool.scikit-build]
 wheel.packages = ["python/rsim"]

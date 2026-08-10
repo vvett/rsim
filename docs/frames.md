@@ -1,261 +1,186 @@
-# Frame transformations
+# Frame and motion framework
 
-`rsim` represents Cartesian reference frames as a tree. Each child stores one
-rigid transform into its parent, and the library composes those transforms to
-convert a position or vector between any two frames with a common root.
+The frame system separates three related ideas:
 
-The public declarations and concise API documentation are in `src/Frames.h`.
-This guide develops the mathematical convention used by that API.
+| Type | Meaning |
+|---|---|
+| `Transform` | The position and orientation between two frames at one instant. |
+| `FrameMotion` | A `Transform` plus the linear and angular motion between those frames. |
+| `MotionState` | The position, velocity, and acceleration of an object expressed in one frame. |
 
-## Transform notation
-
-The name `a_from_b` means “a transform that accepts coordinates expressed in B
-and returns coordinates expressed in A.” The order is deliberately explicit:
-
-```text
-p_a = a_from_b.applyPosition(p_b)
-```
-
-A rigid transform contains a rotation matrix `R_ab` and translation `t_ab`:
-
-```text
-p_a = R_ab p_b + t_ab
-```
-
-`t_ab` is the position of B's origin expressed in A. It is not simply an
-arbitrary displacement: its meaning depends on both the source and destination
+This separation prevents an instantaneous rotation from being mistaken for all
+the information required to convert velocity or acceleration between moving
 frames.
 
-The equivalent homogeneous-coordinate representation is:
+## Naming convention
 
-```text
-        [ R_ab  t_ab ]
-T_ab =  [             ]
-        [  0      1   ]
-```
-
-`Transform` stores the rotation as an Eigen quaternion instead of a 3-by-3
-matrix. Quaternions are compact, compose efficiently, avoid the singularity of
-Euler angles, and can be renormalized to limit numerical drift.
-
-## Quaternion rotation
-
-A quaternion is written as:
-
-```text
-q = w + xi + yj + zk
-```
-
-For a unit quaternion `q`, a vector `v` can be treated as the pure quaternion
-`(0, v)`. Rotation is mathematically:
-
-```text
-v_rotated = q (0, v) q*
-```
-
-where `q*` is the quaternion conjugate. Eigen implements this operation through:
-
-```cpp
-Eigen::Vector3d rotated = quaternion * vector;
-```
-
-The `Transform` constructor normalizes its quaternion. A zero quaternion cannot
-represent a rotation and is rejected.
-
-## Positions and free vectors
-
-A position identifies a point, so both rotation and translation apply:
+Names such as `a_from_b` state the direction explicitly. They accept coordinates
+expressed in B and return coordinates expressed in A:
 
 ```text
 p_a = R_ab p_b + t_ab
 ```
 
-This is implemented by `applyPosition()`.
-
-A free vector represents a direction or difference between two positions. For
-example, if `v_b = p2_b - p1_b`, then:
-
-```text
-v_a = (R_ab p2_b + t_ab) - (R_ab p1_b + t_ab)
-    = R_ab (p2_b - p1_b)
-    = R_ab v_b
-```
-
-The translations cancel. Consequently `applyVector()` performs only rotation.
-Directions, displacements, forces, and angular velocities are normally free
-vectors. Absolute locations must use `applyPosition()`.
-
-## Composition
-
-Suppose B is a child of A and C is a child of B:
-
-```text
-p_a = R_ab p_b + t_ab
-p_b = R_bc p_c + t_bc
-```
-
-Substituting the second equation into the first gives:
-
-```text
-p_a = R_ab (R_bc p_c + t_bc) + t_ab
-    = (R_ab R_bc) p_c + (R_ab t_bc + t_ab)
-```
-
-Therefore:
-
-```text
-R_ac = R_ab R_bc
-t_ac = R_ab t_bc + t_ab
-```
-
-The API expresses this as:
+`t_ab` is the location of B's origin expressed in A. Composition follows:
 
 ```cpp
-rsim::Transform a_from_c = a_from_b * b_from_c;
+a_from_c = a_from_b * b_from_c;
 ```
 
-The right-hand transform is applied first, just as with ordinary matrix
-multiplication. The implementation uses quaternion multiplication for the
-rotation and `a_from_b.applyPosition(t_bc)` for the translation.
+The right-hand relationship is applied first.
 
-## Inversion
+## Transform
 
-Starting with:
-
-```text
-p_a = R_ab p_b + t_ab
-```
-
-subtract the translation and premultiply by the inverse rotation:
-
-```text
-p_b = R_ab^-1 (p_a - t_ab)
-    = R_ab^T p_a - R_ab^T t_ab
-```
-
-A rotation matrix is orthogonal, so its inverse equals its transpose. Thus:
-
-```text
-R_ba = R_ab^T
-t_ba = -R_ab^T t_ab
-```
-
-For a unit quaternion, the conjugate is its inverse. `Transform::inverse()` uses
-the quaternion conjugate and rotates the negated translation accordingly.
-
-## Frame nodes and providers
-
-A `Frame` is a named node. Every child owns a `TransformProvider` that supplies
-`parent_from_child`. The provider makes the transform model replaceable without
-putting geodesy, astronomy, or vehicle dynamics into `Frame` itself.
-
-Examples include:
-
-```text
-ECI root
-└── ECEF       EciEcefProvider, updated from time and Earth orientation
-    └── NED    fixed at a particular geodetic origin
-        └── Body   updated from vehicle position and attitude
-```
-
-The provider owns its cached transform. Its `update()` method reads dependencies
-provided at construction—such as a simulation clock or vehicle state—and
-refreshes that cache. `parentFromChild()` returns the latest cached value.
-
-`FixedTransformProvider::update()` intentionally does nothing. It satisfies the
-same interface for transformations such as a fixed sensor mounting offset.
-
-## Graph updates
-
-`FrameGraph::update()` recursively visits parents before children. It maintains
-two sets:
-
-- `updating` contains nodes on the active recursion path and detects cycles.
-- `updated` prevents a shared ancestor from being updated more than once in a
-  single pass.
-
-Parent-first ordering matters when a child calculation depends on an ancestor's
-new state. An ECEF-to-body calculation, for example, should not combine a new
-body attitude with an ECEF transform from the previous timestep.
-
-## Transforming between arbitrary frames
-
-To find `destination_from_source`, the graph independently walks from each frame
-to its root and composes the edges:
-
-```text
-root_from_destination = T_rd
-root_from_source      = T_rs
-```
-
-Both paths must end at the same root. The desired transform is:
-
-```text
-destination_from_source = inverse(T_rd) * T_rs
-```
-
-This follows because:
-
-```text
-p_root        = T_rs p_source
-p_destination = inverse(T_rd) p_root
-```
-
-Combining them yields:
-
-```text
-p_destination = inverse(T_rd) T_rs p_source
-```
-
-The graph currently composes paths on demand rather than caching root transforms.
-That keeps invalidation simple while the frame system is small. If profiling
-later shows this traversal to be significant, root transforms can be cached once
-per update generation without changing the public convention.
-
-## Example
+`Transform` converts positions and free vectors:
 
 ```cpp
-#include "Frames.h"
+Eigen::Vector3d position_a = a_from_b.applyPosition(position_b);
+Eigen::Vector3d force_a = a_from_b.applyVector(force_b);
+```
 
-#include <Eigen/Geometry>
-#include <memory>
+A position receives rotation and translation. A direction, force, displacement,
+or other free vector receives only rotation. `inverse()` reverses the conversion.
 
-auto eci = std::make_shared<rsim::Frame>("eci");
+## MotionState
+
+`MotionState` belongs to an object, not a frame relationship:
+
+```cpp
+rsim::MotionState rocket_in_ecef{
+    position,
+    velocity,
+    acceleration
+};
+```
+
+All three members must be expressed in the same frame.
+
+## FrameMotion
+
+`FrameMotion` describes a child frame relative to its parent. It contains:
+
+- `transform()`: the instantaneous `parent_from_child` pose;
+- `childOriginVelocity()`: velocity of the child origin relative to the parent;
+- `childOriginAcceleration()`: acceleration of the child origin;
+- `childAngularVelocity()`: angular velocity of the child axes;
+- `childAngularAcceleration()`: angular acceleration of the child axes.
+
+The four rate vectors are expressed in the parent frame.
+
+For child-frame position `p`, velocity `v`, and acceleration `a`, define:
+
+```text
+r = R p
+u = R v
+```
+
+`convertState()` calculates:
+
+```text
+p_parent = r + t
+
+v_parent = R v
+         + origin_velocity
+         + angular_velocity × r
+
+a_parent = R a
+         + origin_acceleration
+         + angular_acceleration × r
+         + angular_velocity × (angular_velocity × r)
+         + 2 angular_velocity × u
+```
+
+The additional acceleration terms account for angular acceleration, centripetal
+acceleration, and Coriolis acceleration. `FrameMotion::fixed()` creates a
+relationship whose four rate vectors are zero.
+
+`FrameMotion::inverse()` reverses both the pose and all frame rates. Composition
+with `operator*` combines the pose and rates through multiple frame edges.
+
+## FrameDefinition
+
+A `FrameDefinition` answers one concrete question:
+
+> How is this child frame positioned and moving relative to its parent now?
+
+It exposes:
+
+```cpp
+void update();
+const FrameMotion& motionIntoParent() const;
+```
+
+`update()` reads the current simulation inputs and recalculates the cached
+relationship. `FixedFrameDefinition` is the simple implementation for sensor
+mounts and other relationships that do not change.
+
+An Earth rotation definition, vehicle body definition, and moving sensor
+definition can all implement the same interface without putting their equations
+inside `Frame`.
+
+## Frame and FrameGraph
+
+A `Frame` is a named node with an explicit `InertialStatus`, a parent, and a
+`FrameDefinition`. A root has no parent or definition. A typical tree is:
+
+```text
+J2000 (inertial root)
+└── ECEF (rotating Earth)
+    └── launch NED
+        └── vehicle body
+            └── sensor
+```
+
+The status is specified when the frame is constructed:
+
+```cpp
+auto j2000 = std::make_shared<rsim::Frame>(
+    "J2000",
+    rsim::InertialStatus::Inertial);
 
 auto ecef = std::make_shared<rsim::Frame>(
-    "ecef",
-    eci,
-    std::make_unique<rsim::FixedTransformProvider>(rsim::Transform{
-        Eigen::Quaterniond::Identity(),
-        Eigen::Vector3d::Zero()
-    }));
-
-rsim::FrameGraph graph;
-graph.addFrame(eci);
-graph.addFrame(ecef);
-graph.update();
-
-const rsim::Transform eci_from_ecef = graph.transform(*eci, *ecef);
-const Eigen::Vector3d point_eci =
-    eci_from_ecef.applyPosition(Eigen::Vector3d{1.0, 2.0, 3.0});
+    "ECEF",
+    rsim::InertialStatus::NonInertial,
+    j2000,
+    std::move(ecef_definition));
 ```
 
-The identity provider in this small example should eventually be replaced by an
-ECI/ECEF provider backed by an Earth-orientation model.
+`isInertial()` is a convenient Boolean query. `inertialStatus()` returns the
+enum. The classification is explicit metadata: it does not add or remove motion
+terms. State conversion always uses the frame's actual `FrameMotion`.
 
-## Geodetic coordinates are not a frame edge
+`FrameGraph::update()` updates parents before children and updates each frame at
+most once per pass. It also detects cycles.
 
-Latitude, longitude, and altitude are coordinates on and above an ellipsoid.
-Their conversion to ECEF is nonlinear, so a single `Transform` cannot represent
-it globally. Keep that operation in a separate GeographicLib adapter:
+The graph exposes three levels of conversion:
+
+```cpp
+// Position and orientation only.
+Transform body_from_ecef = frames.transform(body, ecef);
+
+// Pose plus relative linear/angular rates.
+FrameMotion body_from_ecef_motion = frames.motion(body, ecef);
+
+// Complete conversion of an object's position, velocity, and acceleration.
+MotionState rocket_in_body =
+    frames.convertState(body, ecef, rocket_in_ecef);
+```
+
+To convert between source and destination, the graph first composes each frame
+to their common root:
 
 ```text
-geodetic position ── nonlinear conversion ──> ECEF position
-                                              │
-                                              └─ Cartesian FrameGraph
+destination_from_source =
+    inverse(root_from_destination) * root_from_source
 ```
 
-After obtaining an ECEF position, the ordinary rigid frame graph can transform
-it into NED, body, sensor, or inertial coordinates. A local NED frame at a fixed
-geodetic origin is a valid frame node because its relationship to ECEF is a
-local rigid rotation and translation.
+Disconnected frame trees cannot be converted.
+
+## Geodetic coordinates
+
+Latitude, longitude, and altitude are not Cartesian coordinates and do not form
+a rigid frame edge. A geodetic library must first convert a geodetic position to
+an ECEF Cartesian position. The resulting Cartesian state can then move
+through `FrameGraph`.
+
+See [earth-frames.md](earth-frames.md) for the simplified J2000/ECEF definition.

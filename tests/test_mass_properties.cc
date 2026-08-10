@@ -4,12 +4,13 @@
 #include <stdexcept>
 
 int main() {
-    const rsim::Body::Matrix3d inertia{{{1.0, 0.0, 0.0},
-                                         {0.0, 2.0, 0.0},
-                                         {0.0, 0.0, 3.0}}};
-    rsim::Body body(10.0, inertia);
+    rsim::Matrix3d inertia;
+    inertia << 1.0, 0.0, 0.0,
+               0.0, 2.0, 0.0,
+               0.0, 0.0, 3.0;
+    rsim::RigidBody body(10.0, inertia);
     assert(body.mass() == 10.0);
-    assert(body.momentOfInertia() == inertia);
+    assert(body.momentOfInertia().isApprox(inertia));
 
     body.setMass(12.0);
     assert(body.mass() == 12.0);

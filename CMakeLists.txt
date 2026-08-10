@@ -8,6 +8,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(FetchContent)
 
+set(BUILD_TESTING OFF CACHE BOOL "Do not build dependency test suites" FORCE)
+set(EIGEN_BUILD_DOC OFF CACHE BOOL "Do not build Eigen documentation" FORCE)
+
 FetchContent_Declare(
     Eigen
     GIT_REPOSITORY https://gitlab.com/libeigen/eigen.git
@@ -21,13 +24,17 @@ option(RSIM_BUILD_DEMO "Build the C++ demonstration executable" OFF)
 option(RSIM_BUILD_TESTS "Build the C++ tests" OFF)
 
 add_library(rsim_core
+    src/EarthFrames.cc
     src/Frames.cc
+    src/MassProperties.cc
     src/Vehicle.cc
 )
 target_include_directories(rsim_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
-target_link_libraries(rsim_core PUBLIC Eigen3::Eigen)
+target_link_libraries(rsim_core
+    PUBLIC Eigen3::Eigen
+)
 set_target_properties(rsim_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(RSIM_BUILD_PYTHON)
@@ -47,4 +54,8 @@ if(RSIM_BUILD_TESTS)
     add_executable(rsim_frame_tests tests/test_frames.cc)
     target_link_libraries(rsim_frame_tests PRIVATE rsim_core)
     add_test(NAME rsim_frame_tests COMMAND rsim_frame_tests)
+
+    add_executable(rsim_earth_frame_tests tests/test_earth_frames.cc)
+    target_link_libraries(rsim_earth_frame_tests PRIVATE rsim_core)
+    add_test(NAME rsim_earth_frame_tests COMMAND rsim_earth_frame_tests)
 endif()

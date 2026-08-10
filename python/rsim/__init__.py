@@ -1,5 +1,5 @@
 """Python interface to the rsim library."""
 
-from ._rsim import Body
+from ._rsim import RigidBody
 
-__all__ = ["Body"]
+__all__ = ["RigidBody"]

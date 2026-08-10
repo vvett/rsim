@@ -12,10 +12,10 @@ python -m unittest discover -s tests -p 'test_python_*.py'
 ```
 
 ```python
-from rsim import Body
+from rsim import RigidBody
 
 inertia = ((1.0, 0.0, 0.0), (0.0, 2.0, 0.0), (0.0, 0.0, 3.0))
-body = Body(10.0, inertia)
+body = RigidBody(10.0, inertia)
 print(body.mass)
 ```
 
@@ -39,4 +39,6 @@ C++ behavior tests and Python binding tests for every new public API.
 ## Frame system
 
 See [docs/frames.md](docs/frames.md) for the frame API, transform convention,
-quaternion mathematics, composition and inversion rules, and update behavior.
+relative-motion framework, state conversion, and update behavior. See
+[docs/earth-frames.md](docs/earth-frames.md) for the simplified J2000/ECEF
+conversion and its single Julian-date input.
