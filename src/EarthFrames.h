@@ -26,11 +26,9 @@ public:
     explicit J2000EarthRotation(const JulianDate& current_date);
 
     void update() override;
-    [[nodiscard]] const FrameMotion& motionIntoParent() const override;
 
 private:
     const JulianDate& current_date_;
-    FrameMotion j2000_from_ecef_;
 };
 
 }  // namespace rsim

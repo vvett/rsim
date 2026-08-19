@@ -1,5 +1,10 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "pybind11>=2.13"]
+requires = [
+    "scikit-build-core>=0.10",
+    "pybind11>=2.13",
+    "cmake>=3.15",
+    "ninja>=1.11",
+]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -7,7 +12,16 @@ name = "rsim"
 version = "0.1.0"
 description = "Python bindings for a C++ six-degree-of-freedom rocket simulation library"
 requires-python = ">=3.9"
-dependencies = ["numpy"]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+# RocketCEA is only needed to regenerate combustion-performance tables. Its
+# native extension requires a system Fortran compiler on platforms without a
+# compatible prebuilt wheel.
+rocketcea = ["RocketCEA==1.2.3"]
 
 [tool.scikit-build]
 wheel.packages = ["python/rsim"]

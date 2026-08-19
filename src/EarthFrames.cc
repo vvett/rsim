@@ -39,17 +39,13 @@ void J2000EarthRotation::update() {
                           Eigen::Vector3d::UnitZ()}
     };
 
-    j2000_from_ecef_ = FrameMotion{
+    motion_ = FrameMotion{
         Transform{j2000_from_ecef, Eigen::Vector3d::Zero()},
         Eigen::Vector3d::Zero(),
         Eigen::Vector3d::Zero(),
         Eigen::Vector3d{0.0, 0.0, earth_rotation_radians_per_second},
         Eigen::Vector3d::Zero()
     };
-}
-
-const FrameMotion& J2000EarthRotation::motionIntoParent() const {
-    return j2000_from_ecef_;
 }
 
 }  // namespace rsim

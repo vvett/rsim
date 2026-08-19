@@ -212,17 +212,20 @@ FrameMotion operator*(const FrameMotion& a_from_b,
     };
 }
 
-FixedFrameDefinition::FixedFrameDefinition(Transform parent_from_child)
-    : motion_(FrameMotion::fixed(std::move(parent_from_child))) {}
-
-FixedFrameDefinition::FixedFrameDefinition(FrameMotion parent_from_child)
-    : motion_(std::move(parent_from_child)) {}
-
-void FixedFrameDefinition::update() {}
-
-const FrameMotion& FixedFrameDefinition::motionIntoParent() const {
+const FrameMotion& FrameDefinition::motionIntoParent() const noexcept {
     return motion_;
 }
+
+FrameDefinition::FrameDefinition(FrameMotion motion)
+    : motion_(std::move(motion)) {}
+
+FixedFrameDefinition::FixedFrameDefinition(Transform parent_from_child)
+    : FrameDefinition(FrameMotion::fixed(std::move(parent_from_child))) {}
+
+FixedFrameDefinition::FixedFrameDefinition(FrameMotion parent_from_child)
+    : FrameDefinition(std::move(parent_from_child)) {}
+
+void FixedFrameDefinition::update() {}
 
 Frame::Frame(std::string name, InertialStatus inertial_status)
     : name_(std::move(name)), inertial_status_(inertial_status) {
@@ -283,6 +286,9 @@ const FrameMotion& Frame::motionIntoParent() const {
     return definition_->motionIntoParent();
 }
 
+FrameGraph::FrameGraph(std::string name, UpdateRate update_rate)
+    : Model(std::move(name), update_rate) {}
+
 void FrameGraph::addFrame(std::shared_ptr<Frame> frame) {
     if (!frame) {
         throw std::invalid_argument("cannot add a null frame");
@@ -299,6 +305,18 @@ void FrameGraph::addFrame(std::shared_ptr<Frame> frame) {
     }
 
     frames_.push_back(std::move(frame));
+}
+
+std::shared_ptr<Frame> FrameGraph::frame(const std::string& name) const {
+    const auto match = std::find_if(
+        frames_.begin(), frames_.end(),
+        [&name](const std::shared_ptr<Frame>& candidate) {
+            return candidate->name() == name;
+        });
+    if (match == frames_.end()) {
+        throw std::invalid_argument("frame is not registered: " + name);
+    }
+    return *match;
 }
 
 void FrameGraph::update() {

@@ -23,13 +23,8 @@ public:
             Eigen::Vector3d{position_, 0.0, 0.0}});
     }
 
-    const rsim::FrameMotion& motionIntoParent() const override {
-        return motion_;
-    }
-
 private:
     double position_ = 0.0;
-    rsim::FrameMotion motion_;
 };
 
 }  // namespace
@@ -68,6 +63,15 @@ int main() {
     graph.addFrame(root);
     graph.addFrame(ecef);
     graph.addFrame(moving);
+
+    assert(graph.frame("root") == root);
+    bool missing_name_rejected = false;
+    try {
+        static_cast<void>(graph.frame("missing"));
+    } catch (const std::invalid_argument&) {
+        missing_name_rejected = true;
+    }
+    assert(missing_name_rejected);
 
     graph.update();
 

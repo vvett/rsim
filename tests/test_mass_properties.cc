@@ -1,6 +1,8 @@
 #include "MassProperties.h"
+#include "Simulator.h"
 
 #include <cassert>
+#include <cmath>
 #include <stdexcept>
 
 int main() {
@@ -22,4 +24,23 @@ int main() {
         rejected_invalid_mass = true;
     }
     assert(rejected_invalid_mass);
+
+    constexpr double pi = 3.14159265358979323846;
+    rsim::CylindricalPropellantTank tank(
+        1.0, 2.0, 0.0, 1.0, 2.0 * pi, pi);
+    body.addPropellantTank(tank);
+
+    // At time zero the full tank extends from x=0 to x=2.
+    body.update();
+    assert(std::abs(body.mass() - (12.0 + 2.0 * pi)) < 1e-12);
+    assert(std::abs(body.cg().x() - 2.0 * pi / body.mass()) < 1e-12);
+
+    // Absolute simulator time removes half the propellant after one second.
+    rsim::Simulator simulator(1.0);
+    simulator.addModel(body);
+    simulator.step();
+    simulator.step();
+    assert(std::abs(body.propellantTank(0).propellantMass() - pi) < 1e-12);
+    assert(std::abs(body.propellantTank(0).centerOfMass().x() - 0.5) < 1e-12);
+    assert(std::abs(body.mass() - (12.0 + pi)) < 1e-12);
 }
